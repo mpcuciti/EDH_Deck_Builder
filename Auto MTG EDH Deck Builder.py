@@ -1,4 +1,5 @@
 from AutoEDHFunctionsandClasses import * 
+from pprint import pprint
 
 #Here there be PsuedoCode
 # 1. Is the given card a valid commander?
@@ -11,39 +12,52 @@ from AutoEDHFunctionsandClasses import *
 
 # there will eventually be a prompt here
 seed_card_url = 'https://edhrec.com/cards/sen-triplets'
+#seed_card_url = 'https://edhrec.com/cards/izzet-signet'
+seed_card = mtgcard(seed_card_url)
+print('Seed Card is', seed_card.name)
 
-if is_valid_commander(seed_card_url) == True:
-    print(seed_card_url)
-    yesno1 = input('Do you want this card to be your commander? (y/n) ')
-    if yesno1 == 'y':
-        commander = mtgcard(seed_card_url)
-    elif yesno1 == 'n':
-        temp_card = mtgcard(seed_card_url)
-        index = 0
-        while index < len(temp_card.top_commanders):
-            commander = None
-            print(temp_card.top_commanders[index]['name'])
-            yesno2 = input('Do you want this to be your commander? (y/n) ')
-            if yesno2 == 'y':
-                commander = mtgcard(temp_card.top_commanders[index]['url'])
-                break
-            elif yesno2 == 'n':
+if seed_card.legal_commander == True:
+    print(seed_card.name, 'is a legal commander')
+    yesno = None
+    index = 0
+    while yesno != 'y':
+        if yesno == None:
+            yesno = input('Do you want this card to be your commander? (y/n) ')
+            if yesno == 'y':
+                    commander = mtgcard(seed_card.url, commander=True)
+        elif yesno == 'n':
+            if index < len(seed_card.top_commanders):
+                temp_card = mtgcard(seed_card.top_commanders[index]['url'])
+                pprint(temp_card.name)
+                yesno = input('Do you want this card to be your commander? (y/n) ')
+                if yesno == 'y':
+                    commander = mtgcard(temp_card.url, commander=True)
                 index += 1
-            else:
-                print('invalid input')
-elif is_valid_commander(seed_card_url) == False:
-    print('Getting top commander based on card....')
-    temp_card = mtgcard(seed_card_url)
-    commander = mtgcard(temp_card.top_commanders[0]['url'])
+            elif index >= len(seed_card.top_commanders):
+                yesno = 'y'
+                print('No Legal Commanders Remaining')
+        else:
+            print('Invalid Input')
+else:
+    print(seed_card.name, 'is not a legal commander')
+    yesno = 'n'
+    index = 0
+    while yesno != 'y':
+        if yesno == 'n':
+            if index < len(seed_card.top_commanders):
+                temp_card = mtgcard(seed_card.top_commanders[index]['url'])
+                pprint(temp_card.name)
+                yesno = input('Do you want this card to be your commander? (y/n) ')
+                if yesno == 'y':
+                    commander = temp_card
+                index += 1
+            elif index >= len(seed_card.top_commanders):
+                yesno = 'y'
+                print('No Legal Commanders Remaining')
+        else:
+            print('Invalid Input')
 
-card_list = list()
-for i in commander.top_cards:
-    print(i['name'])
-    card_list.append(mtgcard(i['url']))
+deck = mtgdeck(commander)
+deck.add_top_commander_cards(3)
 
-print(len(card_list))
-
-for i in card_list:
-    print(i.name)
-
-        
+pprint(deck.deck_list.keys())
