@@ -1,6 +1,7 @@
 import requests
 import json
 import pprint
+import random
 
 # content = requests.get("https://edhrec-json.s3.amazonaws.com/en/cards/swords-to-plowshares.json")
 # content = content.json()
@@ -20,6 +21,7 @@ class mtgcard:
 
     def clean_url(self, url):
         if self.url[0] == '/':
+            self.short_url = self.url
             self.url = 'https://edhrec.com' + self.url
 
     def get_json(self, url):
@@ -56,17 +58,22 @@ class mtgcard:
         self.top_cards = self.search_card_lists('Top Cards')
         self.top_synergy = self.search_card_lists('High Synergy Cards')
 
+        self.short_url = '/cards/' + content['card']['sanitized']
+
     def search_card_lists(self, list_name):
         for dict in self.card_lists:
             if dict['header'] == list_name:
                 return dict['cardviews']
         return None
-        
+
+##########################################
 class mtgdeck:
     def __init__(self, commander):
         self.commander = commander
         self.deck_list = {self.commander.name: commander}
         self.mana_curve = {}
+        self.seed_pile = None
+        self.choice_list = []
 
     def mana_match(self, temp_card):
     #makes sure the card fits with the commander color identity
@@ -89,20 +96,28 @@ class mtgdeck:
                 print('Adding', temp_card.name)
                 self.deck_list[temp_card.name] = temp_card
                 return True
-        return None
+        return False
     
     def add_top_commander_cards(self, x):
         index = 0
         number_of_cards_added = 0
         while number_of_cards_added < x and index < len(self.commander.top_cards):
             temp_card = mtgcard(self.commander.top_cards[index]['url'])
-            if self.is_card_in_deck(temp_card) == True:
-                index += 1
-            else: 
-                if(self.add_card(temp_card)) == True:
-                    number_of_cards_added += 1
-                index += 1
+            if self.add_card(temp_card) == True:
+                number_of_cards_added += 1
+            index += 1     
         return number_of_cards_added
+
+    def add_top_synergy_commander_cards(self, x):
+        index = 0
+        number_of_cards_added = 0
+        while number_of_cards_added < x and index < len(self.commander.top_synergy):
+            temp_card = mtgcard(self.commander.top_synergy[index]['url'])
+            if self.add_card(temp_card) == True:
+                number_of_cards_added += 1
+            index += 1
+        return number_of_cards_added
+
 
     def just_add_every_related_card(self):
         for card_list in self.commander.card_lists:
@@ -121,9 +136,65 @@ class mtgdeck:
             elif card.cmc not in self.mana_curve.keys():
                 self.mana_curve[card.cmc] = 1
         return
-    
-    def get_to_x_cards(self):
+
+    def build_card_seed_pile(self):
+        card_seed_dict = {}
+        for x in range(10):
+            if x == 0:
+                temp_list = []
+                for card in self.deck_list.values():
+                    temp_list.append(card.short_url)
+                card_seed_dict[0] = temp_list
+            else:
+                card_seed_dict[x] = []
+                for card_name, card in self.deck_list.items():
+                    card_already_present = False
+                    for y in range(x + 1):
+                        if card_already_present != True:
+                            if card.top_cards[x]['url'] in card_seed_dict[y]:
+                                card_already_present = True
+                    if card_already_present != True:
+                        card_seed_dict[x].append(card.top_cards[x]['url'])
+        self.seed_pile = card_seed_dict
+        self.create_choice_list()
         return
+
+    def create_choice_list(self):
+        #This builds a weighted list of integers for the random.choice function to operate on
+        self.choice_list = []
+        for x in range(len(self.seed_pile)):
+            if x != 0:
+                for y in range(len(self.seed_pile) - x):
+                    self.choice_list.append(x)
+
+    def add_1_random_card_from_seed_pile(self):
+        if not self.seed_pile:
+            self.build_card_seed_pile()
+        if not self.choice_list:
+            self.create_choice_list()
+        added_card = False
+        while added_card != True:
+            stack_choice = random.choice(self.choice_list)
+            temp_card_url = random.choice(self.seed_pile[stack_choice])
+            temp_card = mtgcard(temp_card_url)
+            print('Trying to add', temp_card.name)
+            if self.add_card(temp_card) == True:
+                added_card = True
+            else:
+                self.seed_pile[stack_choice].remove(temp_card_url)
+                if not self.seed_pile[stack_choice]:
+                    self.seed_pile.pop(stack_choice)
+                    self.create_choice_list()
+        return
+    
+    def get_to_x_nonland_cards_in_deck(self,x):
+        y = 0
+        while x > len(self.deck_list):
+            self.add_1_random_card_from_seed_pile()
+            y += 1
+            if y == 5:
+                self.build_card_seed_pile()
+                y = 0
 
 
 
