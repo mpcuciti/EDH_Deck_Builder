@@ -18,24 +18,25 @@ class mtgcard:
         else:
             commander == False
 
-        self.clean_url(self.url)
+        self.clean_url()
         self.get_json(self.url)
 
-    def clean_url(self, url):
+    def clean_url(self):
         if self.url[0] == '/':
             self.short_url = self.url
             self.url = 'https://edhrec.com' + self.url
 
-        if 'cards' in url or self.commander == False:
+        if 'cards' in self.url:
             url_base = 'https://edhrec-json.s3.amazonaws.com/en/cards/'
-        elif 'commanders' in url or self.commander == True:
+        elif 'commanders' in self.url:
             url_base = 'https://edhrec-json.s3.amazonaws.com/en/commanders/'
         i = 0
-        for each in url:
+        for each in self.url:
             if each == '/':
                 output = i
             i += 1
-        self.json_url = url_base + url[output + 1: len(url)] + '.json'
+        self.json_url = url_base + self.url[output + 1: len(self.url)] + '.json'
+        return
 
     def check_if_card_in_database(self):
         if self.conn == None:
@@ -105,13 +106,14 @@ class mtgcard:
 
         self.top_commanders = self.search_card_lists('Top Commanders')
         self.top_cards = self.search_card_lists('Top Cards')
-        self.top_synergy = self.search_card_lists('High Synergy Cards')
+        self.top_synergy = self.search_card_lists('High Synergy Cards')        
         self.build_synergy_list()
         self.build_salt_list()
 
         self.short_url = '/cards/' + content['card']['sanitized']
 
     def build_synergy_list(self):
+        self.synergy_list = None
         if self.card_lists:
             self.synergy_list = {}
             for dict in self.card_lists:
@@ -121,6 +123,7 @@ class mtgcard:
                             self.synergy_list[card['synergy']] = card['url'] 
 
     def build_salt_list(self):
+        self.salt_list = None
         if self.card_lists:
             self.salt_list = {}
             for dict in self.card_lists:
@@ -143,6 +146,7 @@ class mtgdeck:
         self.conn = conn
         self.deck_list = {self.commander.name: commander}
         self.mana_curve = {}
+        self.land_target = random.randint(35, 42)
         self.seed_pile = None
         self.choice_list = []
 
@@ -208,6 +212,22 @@ class mtgdeck:
                 self.mana_curve[card.cmc] = 1
         return
 
+    def calculate_mana_distribution(self):
+        self.mana_distribution = {}
+        for card in self.deck_list.values():
+            for color in card.color_id:
+                if color not in self.mana_distribution.keys():
+                    self.mana_distribution[color] = 1
+                else:
+                    self.mana_distribution[color] += 1
+        self.calculate_deck_cmc()
+        total_count = 0
+        for count in self.mana_distribution.values():
+            total_count += count
+        for color, value in self.mana_distribution.items():
+            self.mana_distribution[color] = value / total_count
+        return
+
     def build_card_seed_pile(self):
         self.seed_pile = {}
         for card in self.deck_list.values():
@@ -217,22 +237,12 @@ class mtgdeck:
                         self.seed_pile[synergy] = url
         return
 
-    def create_choice_list(self):
-        #This builds a weighted list of integers for the random.choice function to operate on
-        #this was a dumb idea and it didn't work. Going simpler to make it work at all before going more complex
-        self.choice_list = []
-        for x in self.seed_pile:
-            if x != 0:
-                for y in range(10 - x):
-                    self.choice_list.append(x)
-
     def add_1_random_card_from_seed_pile(self):
         added_card = False
         while added_card != True:
             choice = random.choices(list(self.seed_pile.keys()), list(self.seed_pile.keys()), k=1)
             choice = choice[0]
             temp_card_url = self.seed_pile[choice]
-            print(temp_card_url)
             temp_card = mtgcard(temp_card_url, conn=self.conn)
             print('Trying to add', temp_card.name)
 
@@ -246,8 +256,10 @@ class mtgdeck:
     def get_to_x_nonland_cards_in_deck(self,x):
         if not self.seed_pile:
             self.build_card_seed_pile()
+    
+        self.count_lands_in_deck()
 
-        while x > len(self.deck_list):
+        while x > (len(self.deck_list) - self.land_count):
             if len(self.seed_pile) < 10: 
                 self.build_card_seed_pile()
 
@@ -256,8 +268,32 @@ class mtgdeck:
             if deck_size == len(self.deck_list.keys()):
                 return 'Error: Ran out of seeds. No valid choices remaining'
             self.build_card_seed_pile()
+            self.count_lands_in_deck()
         return
 
+    def count_lands_in_deck(self):
+        self.land_count = 0
+        for card in self.deck_list.values():
+            if 'land' in card.type:
+                self.land_count += 1
+
+    def calculate_deck_cmc(self):
+        self.deck_cmc = 0
+        for card in self.deck_list.values():
+            self.deck_cmc += card.cmc
+
+    def landfall(self):
+        basic_land_dict = {
+            'W': 'https://edhrec.com/cards/plains',
+            'U': 'https://edhrec.com/cards/island',
+            'B': 'https://edhrec.com/cards/swamp',
+            'G': 'https://edhrec.com/cards/forest',
+            'R': 'https://edhrec.com/cards/mountain'
+        }
+        self.calculate_mana_distribution()
+        for color, value in self.mana_distribution.items():
+            for x in range(int(value * float(self.land_target))):
+                self.add_card(mtgcard(basic_land_dict[color]))
 
 
 def is_valid_commander(url):
