@@ -1,21 +1,23 @@
 import requests
 import json
-import pprint
 import random
+from datetime import datetime
 
 # content = requests.get("https://edhrec-json.s3.amazonaws.com/en/cards/swords-to-plowshares.json")
 # content = content.json()
 # pprint.pprint(type(content['container']['json_dict']['cardlists'][5]['cardviews'][0]))
 
 class mtgcard:
-    def __init__(self, url, commander=False):
+    def __init__(self, url, commander=False, conn=None):
         self.url = url
+        self.conn = conn
         if commander == False:
             self.commander = False
         elif commander == True:
             self.commander = True
         else:
             commander == False
+
         self.clean_url(self.url)
         self.get_json(self.url)
 
@@ -24,7 +26,6 @@ class mtgcard:
             self.short_url = self.url
             self.url = 'https://edhrec.com' + self.url
 
-    def get_json(self, url):
         if 'cards' in url or self.commander == False:
             url_base = 'https://edhrec-json.s3.amazonaws.com/en/cards/'
         elif 'commanders' in url or self.commander == True:
@@ -35,13 +36,58 @@ class mtgcard:
                 output = i
             i += 1
         self.json_url = url_base + url[output + 1: len(url)] + '.json'
-        content = requests.get(self.json_url).json()
-        content = content['container']['json_dict']
-        
+
+    def check_if_card_in_database(self):
+        if self.conn == None:
+            self.raw_json = requests.get(self.json_url).json()
+            return
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT * FROM mtgcard_data WHERE url = %s",
+            [self.json_url]
+        )
+        rows = cursor.fetchall()
+        cursor.close()
+        if not rows:
+            self.add_json_to_db()
+            return 'This is a test and nothing was returned'
+        elif rows:
+            self.load_json_from_db()
+            return 'This is a test and something was retrieved'
+
+    def add_json_to_db(self):
+        temp = requests.get(self.json_url).text
+        self.name = json.loads(temp)['container']['json_dict']['card']['name']
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "INSERT INTO mtgcard_data (name, url, json_data, timestamp) VALUES(%s, %s, %s, %s) ;",
+            [self.name, self.json_url, temp, datetime.now()]
+        )
+        self.conn.commit()
+        cursor.close()
+        self.load_json_from_db()
+        return
+
+    def load_json_from_db(self):
+        cursor = self.conn.cursor()
+        cursor.execute(
+            "SELECT json_data FROM mtgcard_data WHERE url = %s ;",
+            [self.json_url]
+            )
+        row = cursor.fetchall()
+        cursor.close()
+        self.raw_json = dict(row[0][0])
+        return
+
+    def get_json(self, url):
+        self.check_if_card_in_database()
+
+        content = self.raw_json['container']['json_dict']
         self.raw_dict = content
         self.cmc = int(content['card']['cmc'])
         self.type = content['card']['type']
         self.name = content['card']['name']
+
         if 'legal_commander' in content['card']:
             self.legal_commander = content['card']['legal_commander']
         else:
@@ -49,18 +95,42 @@ class mtgcard:
 
 
         if not content['card']['color_identity']:
-            self.color_id = [0]
+            self.color_id = None
         self.color_id = content['card']['color_identity']
 
-        self.card_lists = content['cardlists']
+        if 'cardlists' in content.keys():
+            self.card_lists = content['cardlists']
+        else:
+            self.card_lists = None
 
         self.top_commanders = self.search_card_lists('Top Commanders')
         self.top_cards = self.search_card_lists('Top Cards')
         self.top_synergy = self.search_card_lists('High Synergy Cards')
+        self.build_synergy_list()
+        self.build_salt_list()
 
         self.short_url = '/cards/' + content['card']['sanitized']
 
+    def build_synergy_list(self):
+        if self.card_lists:
+            self.synergy_list = {}
+            for dict in self.card_lists:
+                if 'land' not in dict['header']:
+                    for card in dict['cardviews']:
+                        if 'synergy' in card.keys():
+                            self.synergy_list[card['synergy']] = card['url'] 
+
+    def build_salt_list(self):
+        if self.card_lists:
+            self.salt_list = {}
+            for dict in self.card_lists:
+                if 'land' not in dict['header']:
+                    for card in dict['cardviews']:
+                        self.synergy_list[card['salt']] = card['url'] 
+
     def search_card_lists(self, list_name):
+        if self.card_lists == None:
+            return None
         for dict in self.card_lists:
             if dict['header'] == list_name:
                 return dict['cardviews']
@@ -68,8 +138,9 @@ class mtgcard:
 
 ##########################################
 class mtgdeck:
-    def __init__(self, commander):
+    def __init__(self, commander, conn=None):
         self.commander = commander
+        self.conn = conn
         self.deck_list = {self.commander.name: commander}
         self.mana_curve = {}
         self.seed_pile = None
@@ -138,63 +209,54 @@ class mtgdeck:
         return
 
     def build_card_seed_pile(self):
-        card_seed_dict = {}
-        for x in range(10):
-            if x == 0:
-                temp_list = []
-                for card in self.deck_list.values():
-                    temp_list.append(card.short_url)
-                card_seed_dict[0] = temp_list
-            else:
-                card_seed_dict[x] = []
-                for card_name, card in self.deck_list.items():
-                    card_already_present = False
-                    for y in range(x + 1):
-                        if card_already_present != True:
-                            if card.top_cards[x]['url'] in card_seed_dict[y]:
-                                card_already_present = True
-                    if card_already_present != True:
-                        card_seed_dict[x].append(card.top_cards[x]['url'])
-        self.seed_pile = card_seed_dict
-        self.create_choice_list()
+        self.seed_pile = {}
+        for card in self.deck_list.values():
+            if card.synergy_list:
+                for synergy, url in card.synergy_list.items():
+                    if url not in self.seed_pile.values():
+                        self.seed_pile[synergy] = url
         return
 
     def create_choice_list(self):
         #This builds a weighted list of integers for the random.choice function to operate on
+        #this was a dumb idea and it didn't work. Going simpler to make it work at all before going more complex
         self.choice_list = []
-        for x in range(len(self.seed_pile)):
+        for x in self.seed_pile:
             if x != 0:
-                for y in range(len(self.seed_pile) - x):
+                for y in range(10 - x):
                     self.choice_list.append(x)
 
     def add_1_random_card_from_seed_pile(self):
-        if not self.seed_pile:
-            self.build_card_seed_pile()
-        if not self.choice_list:
-            self.create_choice_list()
         added_card = False
         while added_card != True:
-            stack_choice = random.choice(self.choice_list)
-            temp_card_url = random.choice(self.seed_pile[stack_choice])
-            temp_card = mtgcard(temp_card_url)
+            choice = random.choices(list(self.seed_pile.keys()), list(self.seed_pile.keys()), k=1)
+            choice = choice[0]
+            temp_card_url = self.seed_pile[choice]
+            print(temp_card_url)
+            temp_card = mtgcard(temp_card_url, conn=self.conn)
             print('Trying to add', temp_card.name)
-            if self.add_card(temp_card) == True:
-                added_card = True
-            else:
-                self.seed_pile[stack_choice].remove(temp_card_url)
-                if not self.seed_pile[stack_choice]:
-                    self.seed_pile.pop(stack_choice)
-                    self.create_choice_list()
+
+            added_card = self.add_card(temp_card)
+            if added_card != True:
+                self.seed_pile.pop(choice)
+            if not self.seed_pile:
+                return 'no cards left!'
         return
     
     def get_to_x_nonland_cards_in_deck(self,x):
-        y = 0
+        if not self.seed_pile:
+            self.build_card_seed_pile()
+
         while x > len(self.deck_list):
-            self.add_1_random_card_from_seed_pile()
-            y += 1
-            if y == 5:
+            if len(self.seed_pile) < 10: 
                 self.build_card_seed_pile()
-                y = 0
+
+            deck_size = len(self.deck_list.keys())
+            self.add_1_random_card_from_seed_pile()
+            if deck_size == len(self.deck_list.keys()):
+                return 'Error: Ran out of seeds. No valid choices remaining'
+            self.build_card_seed_pile()
+        return
 
 
 
