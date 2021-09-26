@@ -296,5 +296,5 @@ class mtgdeck:
                 for card in dictionary.values():
                     print_deck_list.append(card.name + ' x1')
         for color, value in self.basic_land_dict.items():
-            print_deck_list.append(color + 'x' + value)
+            print_deck_list.append(color + 'x' + str(value))
         return print_deck_list
