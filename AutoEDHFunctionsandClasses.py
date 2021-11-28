@@ -141,7 +141,6 @@ class mtgcard:
         temp_card = mtgcard(self.related_cards[choice]['url'], conn=self.conn)
         return temp_card
 
-
 class mtgdeck:
     def __init__(self, commander, conn=None):
         self.commander = commander
