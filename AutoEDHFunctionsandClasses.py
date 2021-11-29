@@ -7,9 +7,9 @@ import math
 
 
 class mtgcard:
-    def __init__(self, url, conn):
+    def __init__(self, url, dynamodb):
         self.url = url
-        self.conn = conn
+        self.dynamodb = dynamodb
 
         self.name = None
         self.cmc = None
@@ -20,9 +20,9 @@ class mtgcard:
         self.related_cards = None
 
         self.clean_url()
-        self.get_card_data()
-        self.parse_card_data()
-        self.build_related_cards_dict()
+        #self.get_card_data()
+        #self.parse_card_data()
+        #self.build_related_cards_dict()
 
     def clean_url(self):
         if self.url[0] == '/':
@@ -42,24 +42,27 @@ class mtgcard:
         self.json_url = url_base + self.url[output + 1: len(self.url)] + '.json'
         return
 
+    def check_if_card_in_database(self):
+        response = self.dynamodb.get_item(
+            Key={
+                'card_json_url': self.json_url
+            }
+        )
+        if response['ResponseMetadata']['HTTPStatusCode'] == 200:
+            if 'Item' in response.keys():
+                return True
+            elif 'Item' not in response.keys():
+                return False
+            else:
+                return False
+        else:
+            return False
+
     def get_card_data(self):
-        if self.check_if_card_in_database() != True:
+        if self.check_if_card_in_database() == False:
             self.add_card_json_to_db()
         self.load_card_json_from_db()
         return
-
-    def check_if_card_in_database(self):
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT * FROM mtgcard_data WHERE card_json_url = %s",
-            [self.json_url]
-        )
-        rows = cursor.fetchall()
-        cursor.close()
-        if not rows:
-            return False
-        else:
-            return True
 
     def add_card_json_to_db(self):
         temp_data = requests.get(self.json_url).text
@@ -73,32 +76,32 @@ class mtgcard:
         cursor.close()
         return
 
-    def load_card_json_from_db(self):
-        cursor = self.conn.cursor()
-        cursor.execute(
-            "SELECT card_json FROM mtgcard_data WHERE card_json_url = %s ;",
-            [self.json_url]
-            )
-        row = cursor.fetchall()
-        cursor.close()
-        self.raw_json = dict(row[0][0])
-        return
+    # def load_card_json_from_db(self):
+    #     cursor = self.conn.cursor()
+    #     cursor.execute(
+    #         "SELECT card_json FROM mtgcard_data WHERE card_json_url = %s ;",
+    #         [self.json_url]
+    #         )
+    #     row = cursor.fetchall()
+    #     cursor.close()
+    #     self.raw_json = dict(row[0][0])
+    #     return
 
-    def parse_card_data(self):
-        content = self.raw_json['container']['json_dict']
-        self.cmc = int(content['card']['cmc'])
-        self.target_mana = int(self.raw_json['land'])
-        self.type = content['card']['primary_type']
-        self.detail_type = content['card']['type']
-        self.name = content['card']['name']
-        self.salt = content['card']['salt']
-        self.color_id = content['card']['color_identity']
-        #legal commander not always present so have to check for it
-        if 'legal_commander' in content['card']:
-            self.legal_commander = content['card']['legal_commander']
-        else:
-            self.legal_commander = False
-        return
+    # def parse_card_data(self):
+    #     content = self.raw_json['container']['json_dict']
+    #     self.cmc = int(content['card']['cmc'])
+    #     self.target_mana = int(self.raw_json['land'])
+    #     self.type = content['card']['primary_type']
+    #     self.detail_type = content['card']['type']
+    #     self.name = content['card']['name']
+    #     self.salt = content['card']['salt']
+    #     self.color_id = content['card']['color_identity']
+    #     #legal commander not always present so have to check for it
+    #     if 'legal_commander' in content['card']:
+    #         self.legal_commander = content['card']['legal_commander']
+    #     else:
+    #         self.legal_commander = False
+    #     return
 
     def build_related_cards_dict(self):
         #Build lists starting here:
