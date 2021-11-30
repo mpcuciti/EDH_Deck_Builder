@@ -1,7 +1,6 @@
 from random import seed
 from AutoEDHFunctionsandClasses import *
-from pprint import pprint
-import psycopg2
+import boto3
 
 #Here there be PsuedoCode
 # 1. Is the given card a valid commander?
@@ -10,20 +9,13 @@ import psycopg2
 # 3. Add the top 15 cards from the commanders top cards to the card list
 # 4. Determine the mana curve (thus far) and estimate number of lands needed for a viable build. Provide this as a choice to the user
 # 5. The total size of the desired deck list 100 less 15 top cards less 1 commander less the number of lands (lands also need to be proportional based on color identity)
-# 6. 
 
-#yes my DB credentials are in here
-# no it's not permanent (just for testing)
-# dont worry about it
-conn = psycopg2.connect(
-    host="postgresql.cuciti.net",
-    database="mtgcard_db",
-    user="mtgcard_db_user",
-    password="jVvWcapRwg5j74"
-)
+session = boto3.session.Session(profile_name='personalprod')
+dynamodb_session = session.resource('dynamodb', region_name='us-east-1')
+dynamodb = dynamodb_session.Table('mtgcard_data')
 
 seed_card_url = input('whats the edhrec url of your seed card?')
-seed_card = mtgcard(seed_card_url, conn)
+seed_card = mtgcard(seed_card_url, dynamodb)
 print('Seed Card is', seed_card.name)
 
 if seed_card.legal_commander == True:
